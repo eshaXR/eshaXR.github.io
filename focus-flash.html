@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Focus Flash</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,wght@0,100;0,300;0,700;1,100;1,300&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0a08;
+    --cream: #f0ece0;
+    --gold: #c8a96e;
+    --gold-dim: rgba(200,169,110,0.15);
+    --green: #7db87a;
+    --red: #c47a6a;
+    --border: rgba(240,236,224,0.1);
+    --panel: rgba(10,10,8,0.82);
+    --text: #f0ece0;
+    --muted: rgba(240,236,224,0.38);
+  }
+
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    overflow: hidden;
+    position: fixed;
+  }
+
+  /* ── VIDEO / AR LAYER ── */
+  #video-bg {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 1s;
+  }
+  #video-bg.active { opacity: 1; }
+
+  /* dark overlay on camera */
+  #cam-overlay {
+    position: fixed; inset: 0; z-index: 1;
+    background: linear-gradient(
+      to bottom,
+      rgba(10,10,8,0.55) 0%,
+      rgba(10,10,8,0.15) 40%,
+      rgba(10,10,8,0.15) 60%,
+      rgba(10,10,8,0.7) 100%
+    );
+    pointer-events: none;
+    opacity: 0; transition: opacity 1s;
+  }
+  #cam-overlay.active { opacity: 1; }
+
+  /* ── SCAN RETICLE ── */
+  #reticle {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 220px; height: 220px;
+    z-index: 3;
+    pointer-events: none;
+    opacity: 0; transition: opacity 0.5s;
+  }
+  #reticle.active { opacity: 1; }
+
+  .corner {
+    position: absolute;
+    width: 24px; height: 24px;
+    border-color: var(--gold);
+    border-style: solid;
+    opacity: 0.8;
+  }
+  .corner.tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+  .corner.tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+  .corner.bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+  .corner.br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+  .scan-line {
+    position: absolute;
+    left: 10px; right: 10px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    top: 10px;
+    animation: scanDown 2.5s ease-in-out infinite;
+    opacity: 0.6;
+  }
+
+  @keyframes scanDown {
+    0% { top: 10px; opacity: 0; }
+    10% { opacity: 0.6; }
+    90% { opacity: 0.6; }
+    100% { top: calc(100% - 10px); opacity: 0; }
+  }
+
+  /* ── MAIN UI LAYER ── */
+  #ui { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; }
+
+  /* ── SPLASH SCREEN ── */
+  #splash {
+    position: fixed; inset: 0; z-index: 50;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 40px 32px;
+    text-align: center;
+    transition: opacity 0.6s, transform 0.6s;
+  }
+  #splash.out { opacity: 0; transform: scale(0.96); pointer-events: none; }
+
+  .splash-eyebrow {
+    font-size: 10px; letter-spacing: 0.35em;
+    text-transform: uppercase; color: var(--gold);
+    margin-bottom: 24px;
+    animation: fadeUp 0.6s 0.1s both;
+  }
+
+  .splash-title {
+    font-family: 'Fraunces', serif;
+    font-size: 72px; font-weight: 100;
+    line-height: 0.9;
+    color: var(--cream);
+    margin-bottom: 8px;
+    animation: fadeUp 0.6s 0.2s both;
+  }
+
+  .splash-title em {
+    font-style: italic; font-weight: 300;
+    color: var(--gold);
+  }
+
+  .splash-sub {
+    font-size: 12px; color: var(--muted);
+    line-height: 1.7; margin-bottom: 48px;
+    max-width: 260px;
+    animation: fadeUp 0.6s 0.3s both;
+  }
+
+  .api-section {
+    width: 100%; max-width: 320px;
+    animation: fadeUp 0.6s 0.4s both;
+  }
+
+  .api-input {
+    width: 100%;
+    background: rgba(240,236,224,0.05);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 13px 16px;
+    color: var(--cream);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    outline: none;
+    margin-bottom: 10px;
+    transition: border-color 0.2s;
+  }
+  .api-input:focus { border-color: rgba(200,169,110,0.5); }
+  .api-input::placeholder { color: var(--muted); }
+
+  .start-btn {
+    width: 100%;
+    padding: 15px;
+    border-radius: 8px;
+    border: none;
+    background: var(--gold);
+    color: #0a0a08;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px; font-weight: 500;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.2s;
+    margin-bottom: 12px;
+  }
+  .start-btn:active { transform: scale(0.98); background: #b8993e; }
+
+  .demo-link {
+    font-size: 11px; color: var(--muted);
+    cursor: pointer; letter-spacing: 0.05em;
+    transition: color 0.2s;
+  }
+  .demo-link:active { color: var(--green); }
+
+  /* ── TOP BAR ── */
+  #top-bar {
+    padding: 52px 20px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    opacity: 0; transition: opacity 0.5s 0.3s;
+  }
+  #top-bar.show { opacity: 1; }
+
+  .app-name {
+    font-family: 'Fraunces', serif;
+    font-size: 16px; font-weight: 300; font-style: italic;
+    color: var(--gold);
+    letter-spacing: 0.02em;
+  }
+
+  #session-badge {
+    font-size: 10px; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  #session-badge .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  /* ── CENTER AREA ── */
+  #center {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 20px;
+    position: relative;
+  }
+
+  /* IDLE STATE */
+  #idle-prompt {
+    text-align: center;
+    transition: opacity 0.4s;
+  }
+  #idle-prompt.hidden { opacity: 0; pointer-events: none; }
+
+  .idle-icon {
+    font-size: 48px; margin-bottom: 16px;
+    animation: floatY 3s ease-in-out infinite;
+  }
+  .idle-text {
+    font-family: 'Fraunces', serif;
+    font-size: 22px; font-weight: 100; font-style: italic;
+    color: var(--cream); line-height: 1.3;
+    margin-bottom: 8px;
+  }
+  .idle-sub { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; }
+
+  /* SCANNING STATE */
+  #scanning-state {
+    text-align: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.4s;
+    position: absolute;
+  }
+  #scanning-state.active { opacity: 1; pointer-events: auto; }
+
+  .scanning-text {
+    font-size: 11px; letter-spacing: 0.25em;
+    text-transform: uppercase; color: var(--gold);
+    animation: blink 1.2s ease-in-out infinite;
+  }
+
+  /* ── RESULT CARD ── */
+  #result-card {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 20;
+    padding: 0 16px 36px;
+    transform: translateY(100%);
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  #result-card.show { transform: translateY(0); }
+
+  .card-inner {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 24px 22px 20px;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* accent line */
+  .card-inner::before {
+    content: '';
+    position: absolute; top: 0; left: 24px; right: 24px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold), transparent);
+    opacity: 0.5;
+  }
+
+  .card-label {
+    font-size: 9px; letter-spacing: 0.3em;
+    text-transform: uppercase; color: var(--gold);
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-label::after {
+    content: ''; flex: 1; height: 1px;
+    background: var(--border);
+  }
+
+  #instruction-text {
+    font-family: 'Fraunces', serif;
+    font-size: 24px; font-weight: 300;
+    line-height: 1.35; color: var(--cream);
+    margin-bottom: 20px;
+    min-height: 80px;
+  }
+
+  /* TIMER */
+  #timer-section {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  #timer-display {
+    font-size: 36px; font-weight: 300;
+    color: var(--cream); letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    flex: 1;
+    transition: color 0.5s;
+  }
+  #timer-display.urgent { color: var(--red); }
+
+  #timer-ring {
+    width: 44px; height: 44px;
+    flex-shrink: 0;
+  }
+  #timer-ring circle {
+    fill: none; stroke-width: 3;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+    transition: stroke-dashoffset 1s linear, stroke 0.5s;
+  }
+  #ring-bg { stroke: var(--border); stroke-dasharray: 100; stroke-dashoffset: 0; }
+  #ring-fill { stroke: var(--gold); stroke-dasharray: 100; stroke-dashoffset: 0; }
+
+  /* ACTION BUTTONS */
+  .action-row { display: flex; gap: 10px; }
+
+  .btn-primary {
+    flex: 1; padding: 13px;
+    border-radius: 10px; border: none;
+    background: var(--gold); color: #0a0a08;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn-primary:active { transform: scale(0.97); }
+
+  .btn-secondary {
+    padding: 13px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent; color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-secondary:active { border-color: var(--cream); color: var(--cream); }
+
+  /* ── FLASH CAPTURE EFFECT ── */
+  #flash {
+    position: fixed; inset: 0; z-index: 40;
+    background: rgba(200,169,110,0.25);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.08s;
+  }
+  #flash.on { opacity: 1; }
+
+  /* ── BOTTOM NAV ── */
+  #bottom-nav {
+    padding: 12px 24px 28px;
+    display: flex; justify-content: center; gap: 20px;
+    opacity: 0; transition: opacity 0.5s 0.4s;
+  }
+  #bottom-nav.show { opacity: 1; }
+
+  /* CAPTURE BUTTON */
+  #capture-btn {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    border: 2px solid var(--gold);
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  #capture-btn::after {
+    content: '';
+    position: absolute;
+    width: 54px; height: 54px;
+    border-radius: 50%;
+    background: var(--gold);
+    transition: all 0.2s;
+  }
+  #capture-btn:active::after { width: 46px; height: 46px; background: #b8993e; }
+  #capture-btn.scanning::after { background: var(--muted); animation: pulse 0.8s infinite; }
+
+  .side-btn {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    backdrop-filter: blur(12px);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; transition: all 0.2s;
+    align-self: center;
+  }
+  .side-btn:active { border-color: var(--gold); transform: scale(0.93); }
+
+  /* NO CAMERA FALLBACK */
+  #no-cam-bg {
+    position: fixed; inset: 0; z-index: 0;
+    background: radial-gradient(ellipse at 40% 40%, #1a1508 0%, #0a0a08 100%);
+  }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed; top: 100px; left: 50%; transform: translateX(-50%);
+    z-index: 60;
+    padding: 10px 20px; border-radius: 20px;
+    background: rgba(10,10,8,0.9); border: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    font-size: 11px; letter-spacing: 0.08em; color: var(--muted);
+    opacity: 0; transition: opacity 0.3s;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ANIMATIONS */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes floatY { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @keyframes spinIn { from { opacity: 0; transform: scale(0.8) rotate(-10deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+</style>
+</head>
+<body>
+
+<div id="no-cam-bg"></div>
+<video id="video-bg" autoplay playsinline muted></video>
+<div id="cam-overlay"></div>
+<div id="flash"></div>
+<div id="toast"></div>
+
+<!-- SCAN RETICLE -->
+<div id="reticle">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <div class="scan-line"></div>
+</div>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-eyebrow">AR Study Tool</div>
+  <div class="splash-title">Focus<br><em>Flash</em></div>
+  <p class="splash-sub">Point at your study space.<br>Get one thing to do right now.</p>
+  <div class="api-section">
+    <input class="api-input" type="password" id="api-key" placeholder="sk-ant-… (Anthropic API key)" autocomplete="off">
+    <button class="start-btn" onclick="startApp()">Open Camera →</button>
+    <div class="demo-link" onclick="startDemo()">Try demo mode — no key needed</div>
+  </div>
+</div>
+
+<!-- MAIN UI -->
+<div id="ui">
+  <div id="top-bar">
+    <div class="app-name">Focus Flash</div>
+    <div id="session-badge"><span class="dot"></span> <span id="session-label">Ready</span></div>
+  </div>
+
+  <div id="center">
+    <div id="idle-prompt">
+      <div class="idle-icon">📸</div>
+      <div class="idle-text">Point at your<br>study space</div>
+      <div class="idle-sub">tap the button to scan</div>
+    </div>
+    <div id="scanning-state">
+      <div class="scanning-text">Analyzing your space…</div>
+    </div>
+  </div>
+
+  <div id="bottom-nav">
+    <button class="side-btn" onclick="showHistory()" title="History">📋</button>
+    <button id="capture-btn" onclick="capture()"></button>
+    <button class="side-btn" onclick="resetApp()" title="Reset">↺</button>
+  </div>
+</div>
+
+<!-- RESULT CARD -->
+<div id="result-card">
+  <div class="card-inner">
+    <div class="card-label">Your next 25 minutes</div>
+    <div id="instruction-text">—</div>
+    <div id="timer-section">
+      <div id="timer-display">25:00</div>
+      <svg id="timer-ring" viewBox="0 0 40 40">
+        <circle id="ring-bg" cx="20" cy="20" r="16" />
+        <circle id="ring-fill" cx="20" cy="20" r="16" />
+      </svg>
+    </div>
+    <div class="action-row">
+      <button class="btn-primary" id="timer-btn" onclick="toggleTimer()">Start Timer</button>
+      <button class="btn-secondary" onclick="rescan()">Rescan</button>
+    </div>
+  </div>
+</div>
+
+<!-- HIDDEN CANVAS for frame capture -->
+<canvas id="capture-canvas" style="display:none"></canvas>
+
+<script>
+// ══════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════
+let apiKey = null, demoMode = false;
+let stream = null;
+let timerInterval = null;
+let timerSeconds = 25 * 60;
+let timerRunning = false;
+let scanning = false;
+let lastInstruction = '';
+let history = [];
+
+const TOTAL_SECONDS = 25 * 60;
+const circumference = 2 * Math.PI * 16; // r=16
+
+// ══════════════════════════════════════════
+// LAUNCH
+// ══════════════════════════════════════════
+function startApp() {
+  const key = document.getElementById('api-key').value.trim();
+  if (!key.startsWith('sk-ant-')) {
+    document.getElementById('api-key').style.borderColor = '#c47a6a';
+    return;
+  }
+  apiKey = key;
+  launch();
+}
+
+function startDemo() { demoMode = true; launch(); }
+
+async function launch() {
+  document.getElementById('splash').classList.add('out');
+  await startCamera();
+  document.getElementById('top-bar').classList.add('show');
+  document.getElementById('bottom-nav').classList.add('show');
+}
+
+// ══════════════════════════════════════════
+// CAMERA
+// ══════════════════════════════════════════
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    const video = document.getElementById('video-bg');
+    video.srcObject = stream;
+    video.classList.add('active');
+    document.getElementById('cam-overlay').classList.add('active');
+    document.getElementById('no-cam-bg').style.opacity = '0';
+  } catch(err) {
+    showToast('Camera unavailable — demo mode');
+    demoMode = true;
+  }
+}
+
+// ══════════════════════════════════════════
+// CAPTURE & ANALYZE
+// ══════════════════════════════════════════
+async function capture() {
+  if (scanning) return;
+  scanning = true;
+
+  // flash effect
+  const flash = document.getElementById('flash');
+  flash.classList.add('on');
+  setTimeout(() => flash.classList.remove('on'), 150);
+
+  // show scanning UI
+  document.getElementById('idle-prompt').classList.add('hidden');
+  document.getElementById('scanning-state').classList.add('active');
+  document.getElementById('reticle').classList.add('active');
+  document.getElementById('capture-btn').classList.add('scanning');
+  document.getElementById('session-label').textContent = 'Scanning…';
+
+  // grab frame
+  let imageBase64 = null;
+  if (stream) {
+    const video = document.getElementById('video-bg');
+    const canvas = document.getElementById('capture-canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    imageBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+  }
+
+  try {
+    const instruction = await getInstruction(imageBase64);
+    showResult(instruction);
+  } catch(err) {
+    showToast('Error — try again');
+    resetScanState();
+  }
+}
+
+async function getInstruction(imageBase64) {
+  if (demoMode || !apiKey) return getDemoInstruction();
+
+  const content = [];
+
+  if (imageBase64) {
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } });
+  }
+
+  content.push({
+    type: 'text',
+    text: `You are Focus Flash — an AI that gives students exactly ONE actionable instruction for the next 25 minutes.
+
+Look at this photo of the student's study environment. Identify what you see: textbooks, notes, laptop, phone, food, clutter, etc.
+
+Return ONLY a single instruction. No preamble. No explanation. No punctuation at the end except a period.
+
+Rules:
+- Start with a verb (Close, Open, Put, Write, Read, Clear, Turn)
+- Be specific to what you see in the image
+- Maximum 20 words
+- Sound like a calm, confident friend — not a productivity app
+- If you can't see much, give a universal focus instruction
+
+Examples of good instructions:
+"Close your laptop, open your notebook to a blank page, and write the one thing you need to understand today."
+"Put your phone face-down in another room, then open to chapter 4 and read until you hit something you don't understand."
+"Clear the left half of your desk and work only in that space for the next 25 minutes."
+
+Now give the instruction for this student:`
+  });
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 80,
+      messages: [{ role: 'user', content }]
+    })
+  });
+
+  const data = await res.json();
+  return data.content?.[0]?.text?.trim() || getDemoInstruction();
+}
+
+// ══════════════════════════════════════════
+// DEMO INSTRUCTIONS
+// ══════════════════════════════════════════
+const DEMO_INSTRUCTIONS = [
+  "Close every tab except one, set your phone face-down, and open to the page you've been avoiding.",
+  "Put your phone in a drawer, clear everything except what you need for the next task, and start.",
+  "Write the single most important thing you need to finish today at the top of a blank page, then do only that.",
+  "Close your laptop, read the first paragraph of your hardest reading, and don't stop until the chapter ends.",
+  "Turn off notifications, open your notes from last week, and fill in the gaps from memory.",
+  "Clear the right side of your desk, move your water bottle within reach, and open your problem set.",
+  "Put everything on the floor except your notebook and one pen. Work in that constraint for 25 minutes.",
+  "Open the assignment you've been putting off. Read just the first question. Then answer it."
+];
+
+function getDemoInstruction() {
+  return DEMO_INSTRUCTIONS[Math.floor(Math.random() * DEMO_INSTRUCTIONS.length)];
+}
+
+// ══════════════════════════════════════════
+// SHOW RESULT
+// ══════════════════════════════════════════
+function showResult(instruction) {
+  lastInstruction = instruction;
+  history.unshift({ text: instruction, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+
+  // update UI
+  document.getElementById('instruction-text').textContent = instruction;
+  resetTimer();
+
+  // hide scanning
+  document.getElementById('scanning-state').classList.remove('active');
+  document.getElementById('reticle').classList.remove('active');
+  document.getElementById('capture-btn').classList.remove('scanning');
+  document.getElementById('idle-prompt').classList.add('hidden');
+  document.getElementById('session-label').textContent = 'Focus mode';
+
+  // show card
+  setTimeout(() => {
+    document.getElementById('result-card').classList.add('show');
+  }, 100);
+
+  scanning = false;
+}
+
+function resetScanState() {
+  scanning = false;
+  document.getElementById('scanning-state').classList.remove('active');
+  document.getElementById('reticle').classList.remove('active');
+  document.getElementById('capture-btn').classList.remove('scanning');
+  document.getElementById('idle-prompt').classList.remove('hidden');
+  document.getElementById('session-label').textContent = 'Ready';
+}
+
+// ══════════════════════════════════════════
+// TIMER
+// ══════════════════════════════════════════
+function resetTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerRunning = false;
+  timerSeconds = TOTAL_SECONDS;
+  updateTimerDisplay();
+  document.getElementById('timer-btn').textContent = 'Start Timer';
+  document.getElementById('timer-display').classList.remove('urgent');
+}
+
+function toggleTimer() {
+  if (timerRunning) {
+    clearInterval(timerInterval);
+    timerRunning = false;
+    document.getElementById('timer-btn').textContent = 'Resume';
+  } else {
+    timerRunning = true;
+    document.getElementById('timer-btn').textContent = 'Pause';
+    timerInterval = setInterval(() => {
+      timerSeconds--;
+      updateTimerDisplay();
+      if (timerSeconds <= 0) {
+        clearInterval(timerInterval);
+        timerRunning = false;
+        document.getElementById('timer-btn').textContent = 'Done ✓';
+        showToast('25 minutes complete — great work');
+      }
+      if (timerSeconds <= 300) {
+        document.getElementById('timer-display').classList.add('urgent');
+      }
+    }, 1000);
+  }
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(timerSeconds / 60);
+  const s = timerSeconds % 60;
+  document.getElementById('timer-display').textContent =
+    String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+
+  // ring
+  const progress = timerSeconds / TOTAL_SECONDS;
+  const offset = circumference * (1 - progress);
+  const ringFill = document.getElementById('ring-fill');
+  ringFill.style.strokeDasharray = circumference;
+  ringFill.style.strokeDashoffset = offset;
+  ringFill.style.stroke = timerSeconds <= 300 ? '#c47a6a' : '#c8a96e';
+
+  const ringBg = document.getElementById('ring-bg');
+  ringBg.style.strokeDasharray = circumference;
+}
+
+// ══════════════════════════════════════════
+// ACTIONS
+// ══════════════════════════════════════════
+function rescan() {
+  document.getElementById('result-card').classList.remove('show');
+  resetTimer();
+  setTimeout(() => {
+    document.getElementById('idle-prompt').classList.remove('hidden');
+    document.getElementById('session-label').textContent = 'Ready';
+  }, 400);
+}
+
+function resetApp() {
+  document.getElementById('result-card').classList.remove('show');
+  resetTimer();
+  scanning = false;
+  document.getElementById('scanning-state').classList.remove('active');
+  document.getElementById('reticle').classList.remove('active');
+  document.getElementById('capture-btn').classList.remove('scanning');
+  document.getElementById('idle-prompt').classList.remove('hidden');
+  document.getElementById('session-label').textContent = 'Ready';
+}
+
+function showHistory() {
+  if (history.length === 0) { showToast('No sessions yet — scan your space'); return; }
+  const last = history.slice(0, 3).map(h => `${h.time}: ${h.text.substring(0,40)}…`).join('\n\n');
+  showToast(`Last scan: ${history[0].time}`);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// init ring on load
+window.addEventListener('load', () => {
+  const c = circumference;
+  document.getElementById('ring-bg').style.strokeDasharray = c;
+  document.getElementById('ring-fill').style.strokeDasharray = c;
+  document.getElementById('ring-fill').style.strokeDashoffset = 0;
+});
+</script>
+</body>
+</html>
